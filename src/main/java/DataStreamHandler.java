@@ -2,36 +2,18 @@ import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.amazonaws.services.lambda.runtime.events.DynamodbEvent;
 import com.amazonaws.services.lambda.runtime.events.models.dynamodb.AttributeValue;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.http.HttpHost;
-import org.apache.http.message.BasicHeader;
-import org.elasticsearch.action.delete.DeleteRequest;
 import org.elasticsearch.action.delete.DeleteResponse;
-import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.action.index.IndexResponse;
-import org.elasticsearch.client.RequestOptions;
-import org.elasticsearch.client.RestClient;
-import org.elasticsearch.client.RestHighLevelClient;
-import org.elasticsearch.xcontent.XContentType;
+import service.ElasticSearchClient;
 
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.Map;
 
 public class DataStreamHandler  implements RequestHandler<DynamodbEvent, String> {
 
-    private final RestHighLevelClient client;
-    private static final String INDEX_NAME = "shipment-index";
-    private static final String ELASTIC_SEARCH_HOST = System.getenv("ELASTIC_SEARCH_HOST");
-    private static final String ELASTIC_SEARCH_HOST_AUTHORIZATION_KEY = System.getenv("ES_AUTORIZATION_API_KEY");
-
+    private final ElasticSearchClient elasticSearchClient;
     public DataStreamHandler() {
-        this.client = new RestHighLevelClient(
-            RestClient.builder( new HttpHost(ELASTIC_SEARCH_HOST, 443, "https"))
-                .setDefaultHeaders(new BasicHeader[]{new BasicHeader("Authorization", "ApiKey " + ELASTIC_SEARCH_HOST_AUTHORIZATION_KEY)}
-            )
-        );
+        this.elasticSearchClient = new ElasticSearchClient();
     }
     @Override
     public String handleRequest(DynamodbEvent dynamodbEvent, Context context) {
@@ -43,17 +25,10 @@ public class DataStreamHandler  implements RequestHandler<DynamodbEvent, String>
                 if ("INSERT".equals(eventName) || "MODIFY".equals(eventName)) {
                     Map<String, AttributeValue> newItem = record.getDynamodb().getNewImage();
                     String jsonString = Utility.convertDynamoDBToJson(newItem);
-
-                    // Index or update the document in Elasticsearch
-                    IndexRequest indexRequest = new IndexRequest(INDEX_NAME)
-                            .id(shipmentId)
-                            .source(jsonString, XContentType.JSON);
-                    IndexResponse response = client.index(indexRequest, RequestOptions.DEFAULT);
+                    IndexResponse response = elasticSearchClient.addOrUpdateDataset(shipmentId,jsonString);
                     context.getLogger().log("Document indexed with status: " + response.status());
                 } else if ("REMOVE".equals(eventName)) {
-                    // Delete the document from Elasticsearch
-                    DeleteRequest deleteRequest = new DeleteRequest(INDEX_NAME, shipmentId);
-                    DeleteResponse deleteResponse = client.delete(deleteRequest, RequestOptions.DEFAULT);
+                    DeleteResponse deleteResponse = elasticSearchClient.deleteDataset(shipmentId);
                     context.getLogger().log("Document deleted with ID: " + shipmentId + " status : " + deleteResponse.status());
                 }
             } catch (IOException e) {
